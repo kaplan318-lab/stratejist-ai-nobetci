@@ -1,0 +1,49 @@
+name: Nobetci
+on:
+  schedule:
+    - cron: "*/30 * * * *"     # yedek tetikleyici (GitHub zamanlamayı sık geciktirir/atlar); asıl süreklilik "zincir" adımıyla sağlanır
+  workflow_dispatch:
+    inputs:
+      sure:
+        description: "Dinleme süresi (saniye); boşsa 1500"
+        required: false
+concurrency:
+  group: nobetci
+  cancel-in-progress: false
+permissions:
+  contents: write
+  actions: write
+jobs:
+  kontrol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Önceki durumu geri yükle
+        uses: actions/cache@v4
+        with:
+          path: durum.json
+          key: nobetci-durum-${{ github.run_id }}
+          restore-keys: nobetci-durum-
+      - name: Haberleri izle ve Telegram komutlarını dinle (yaklaşık 25 dakika)
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          KONULAR: ${{ secrets.KONULAR }}
+          HEPSINI_BILDIR: ${{ secrets.HEPSINI_BILDIR }}
+          KOMUT_SURESI: ${{ inputs.sure || '1500' }}   # saniye: bu süre boyunca komutlar 15 sn'de bir yanıtlanır, haberler 5 dakikada bir kontrol edilir
+        run: dotnet run -c Release --project Nobetci.csproj
+      - name: Zincir - sonraki çalışmayı hemen sıraya al (kesintisiz izleme)
+        if: ${{ always() && vars.ZINCIR != 'kapali' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run nobetci.yml --repo ${{ github.repository }} || true
+      - name: Depoyu canlı tut (GitHub 60 gün işlemsiz depolarda zamanlamayı durdurur)
+        run: |
+          if [ "$(date -u +%u)" = "1" ] && [ "$(date -u +%H)" = "03" ]; then
+            git config user.name "nobetci"; git config user.email "nobetci@users.noreply.github.com"
+            git commit --allow-empty -m "canlı tut $(date -u +%F)" && git push || true
+          fi
